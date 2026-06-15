@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: smartcart-pg
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cart}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cart}
+      POSTGRES_DB: ${POSTGRES_DB:-cart}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - smartcart-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cart} -d ${POSTGRES_DB:-cart}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: smartcart-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - smartcart-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: smartcart-api
+    env_file:
+      - .env
+    environment:
+      # In-cluster connection strings override anything in .env
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-cart}:${POSTGRES_PASSWORD:-cart}@postgres:5432/${POSTGRES_DB:-cart}?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      PORT: "3000"
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  smartcart-pg-data:
+  smartcart-redis-data:

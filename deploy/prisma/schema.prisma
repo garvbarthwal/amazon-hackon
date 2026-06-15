@@ -1,0 +1,109 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, pg_trgm]
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  name          String
+  image         String
+  price         Float
+  rating        Float    @default(0)
+  reviews       Int      @default(0)
+  quantity      String
+  subCategory   String
+  category      String
+  brand         String?
+  domain        String?
+  inStock       Boolean  @default(true)
+  syntheticText String?
+  // embedding vector(768) — managed via raw SQL
+  createdAt     DateTime @default(now())
+
+  @@index([subCategory])
+  @@index([category])
+  @@index([brand])
+  @@index([domain])
+}
+
+/// Sub-category vocabulary with semantic descriptions and embeddings.
+/// `embedding` is vector(768) — managed via raw SQL since Prisma lacks native vector support.
+model SubCategory {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  category    String
+  description String
+  productCount Int     @default(0)
+  // embedding column added via SQL migration: vector(768)
+
+  @@index([category])
+}
+
+/// Mission / Dish knowledge base. Source of truth for "what does this query need?"
+/// type: "mission" (movie_night, tea_party) or "dish" (pav_bhaji, biryani).
+/// aliases: free-form phrases that resolve to this entry ("movie night", "movie snacks").
+/// essentials/recommended/premium: jsonb arrays of Requirement.
+model MissionKB {
+  slug           String   @id
+  type           String
+  aliases        String[]
+  essentials     Json
+  recommended    Json
+  premium        Json
+  isLlmGenerated Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([type])
+  @@map("MissionKB")
+}
+
+/// Per-query requirement cache. 30-day TTL enforced at read time
+/// via `createdAt + 30 days < now()`. Keyed by normalized query + queryType.
+model RequirementCache {
+  id          Int      @id @default(autoincrement())
+  query       String
+  queryType   String
+  payload     Json     // PlannerOutput
+  createdAt   DateTime @default(now())
+
+  @@unique([query, queryType])
+  @@index([createdAt])
+}
+
+/// Brand aggregate stats. Computed once after Brand extraction;
+/// used in ranking to bias toward strong brands.
+model Brand {
+  name         String   @id
+  productCount Int
+  avgRating    Float
+  totalReviews Int
+  brandScore   Float    // pre-computed normalized score in 0..1
+  createdAt    DateTime @default(now())
+
+  @@index([brandScore])
+}
+
+/// v5 — Per-API-request audit log. One row per call to /v1/cart/plan or
+/// /v1/cart/chat. Supports GET /v1/cart/status/:requestId.
+/// `response` is the full frozen CartResponse JSON for replay.
+model CartRequestLog {
+  requestId   String   @id
+  query       String
+  queryType   String
+  status      String
+  coverage    Float
+  sessionId   String?
+  response    Json
+  latencyMs   Int
+  createdAt   DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("CartRequestLog")
+}
